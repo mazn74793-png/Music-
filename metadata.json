@@ -1,0 +1,10 @@
+{
+  "name": "MyStreamer",
+  "description": "Premium music streaming PWA with offline support, local file playback, and atmospheric dark-mode UI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "audio-playback",
+    "offline-storage",
+    "pwa"
+  ]
+}
