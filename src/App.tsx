@@ -12,7 +12,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, Pause, SkipBack, SkipForward, Search as SearchIcon, 
   Library as LibraryIcon, Download, DownloadCloud, Trash2, 
-  Plus, Heart, Menu, X, ChevronDown, Music, WifiOff, Upload
+  Plus, Heart, Menu, X, ChevronDown, Music, WifiOff, Upload,
+  Monitor, ExternalLink, ShieldCheck, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Song, getAllSongs, saveSong, deleteSong } from './db';
@@ -22,7 +23,7 @@ import { loginWithGoogle, logout, subscribeToAuth, toggleFavorite, getFavorites,
 
 // --- Components ---
 
-type View = 'library' | 'search' | 'local' | 'favorites';
+type View = 'library' | 'search' | 'local' | 'favorites' | 'settings';
 
 export default function App() {
   const [view, setView] = useState<View>('library');
@@ -31,6 +32,9 @@ export default function App() {
   const [library, setLibrary] = useState<Song[]>([]);
   const [favorites, setFavorites] = useState<FavoriteSong[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [ytStatus, setYtStatus] = useState<{ signedIn: boolean; user: any }>({ signedIn: false, user: null });
+  const [ytAuthData, setYtAuthData] = useState<any>(null);
+  const [isConnectingYt, setIsConnectingYt] = useState(false);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -46,6 +50,7 @@ export default function App() {
   // Load library on mount
   useEffect(() => {
     refreshLibrary();
+    checkYtStatus();
     const unsubscribe = subscribeToAuth((u) => {
       setUser(u);
       if (u) {
@@ -65,6 +70,50 @@ export default function App() {
   const refreshFavorites = async (userId: string) => {
     const favs = await getFavorites(userId);
     setFavorites(favs as FavoriteSong[]);
+  };
+
+  const checkYtStatus = async () => {
+    try {
+      const res = await axios.get('/api/yt/auth/status');
+      setYtStatus(res.data);
+    } catch (e) {
+      console.error('Failed to check YT status');
+    }
+  };
+
+  const startYtConnect = async () => {
+    setIsConnectingYt(true);
+    try {
+      const res = await axios.get('/api/yt/auth/start');
+      setYtAuthData(res.data);
+      
+      // Start polling for completion
+      const interval = setInterval(async () => {
+        const statusRes = await axios.get('/api/yt/auth/status');
+        if (statusRes.data.signedIn) {
+          setYtStatus(statusRes.data);
+          setYtAuthData(null);
+          setIsConnectingYt(false);
+          clearInterval(interval);
+        }
+      }, 5000);
+
+      // Cleanup polling after 5 mins
+      setTimeout(() => clearInterval(interval), 300000);
+
+    } catch (e) {
+      console.error('Failed to start YT auth');
+      setIsConnectingYt(false);
+    }
+  };
+
+  const logoutYt = async () => {
+    try {
+      await axios.post('/api/yt/auth/logout');
+      checkYtStatus();
+    } catch (e) {
+      console.error('Failed to logout from YT');
+    }
   };
 
   const handleFavorite = async (song: any) => {
@@ -279,6 +328,13 @@ export default function App() {
                 <SearchIcon className="w-5 h-5" />
                 Search
               </button>
+              <button 
+                onClick={() => setView('settings')}
+                className={`flex items-center gap-3 transition-colors ${view === 'settings' ? 'text-cyan-400 font-medium' : 'text-zinc-400 hover:text-white'}`}
+              >
+                <Monitor className="w-5 h-5" />
+                Connectivity
+              </button>
             </div>
 
             <div className="space-y-4">
@@ -408,6 +464,68 @@ export default function App() {
                       ))}
                     </div>
                   )}
+                </motion.div>
+              ) : view === 'settings' ? (
+                <motion.div 
+                  key="settings"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <div className="mb-12">
+                    <h1 className="text-7xl font-bold tracking-tight mb-4 leading-none">YT <span className="text-red-500">Connect</span>.</h1>
+                    <p className="text-zinc-500 text-xl max-w-xl">Bypass bot detection by connecting your real YouTube Music account.</p>
+                  </div>
+
+                  <div className="max-w-2xl bg-zinc-900/50 rounded-3xl p-8 border border-zinc-800">
+                    <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${ytStatus.signedIn ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                          {ytStatus.signedIn ? <ShieldCheck className="w-6 h-6" /> : <WifiOff className="w-6 h-6" />}
+                        </div>
+                        <div>
+                          <h2 className="font-bold text-xl">Status: {ytStatus.signedIn ? 'Authenticated' : 'Guest'}</h2>
+                          <p className="text-zinc-500 text-sm">{ytStatus.signedIn ? 'Operating as an official mobile client' : 'Operating via anonymous proxy'}</p>
+                        </div>
+                      </div>
+                      {ytStatus.signedIn && (
+                        <button onClick={logoutYt} className="px-4 py-2 border border-zinc-800 rounded-lg text-sm hover:bg-zinc-800 transition-colors text-red-400">Disconnect</button>
+                      )}
+                    </div>
+
+                    {!ytStatus.signedIn && !ytAuthData && (
+                      <button 
+                        onClick={startYtConnect}
+                        disabled={isConnectingYt}
+                        className="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl font-bold text-lg transition-all flex items-center justify-center gap-3"
+                      >
+                        {isConnectingYt ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Monitor className="w-6 h-6" />}
+                        Link YouTube Music Account
+                      </button>
+                    )}
+
+                    {ytAuthData && (
+                      <div className="mt-8 p-6 bg-black rounded-2xl border border-red-500/30 text-center animate-in fade-in slide-in-from-bottom-4">
+                        <p className="text-zinc-400 mb-2">Step 1: Open this URL on your phone/PC</p>
+                        <a 
+                          href={ytAuthData.verification_url} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="text-cyan-400 font-bold mb-6 block text-lg underline flex items-center justify-center gap-2"
+                        >
+                          {ytAuthData.verification_url} <ExternalLink className="w-4 h-4" />
+                        </a>
+                        <p className="text-zinc-400 mb-2">Step 2: Enter this verification code</p>
+                        <div className="text-5xl font-mono font-bold tracking-widest text-white py-6 bg-zinc-900 rounded-xl mb-4 border border-zinc-800">
+                          {ytAuthData.user_code}
+                        </div>
+                        <div className="flex items-center justify-center gap-2 text-zinc-500 text-sm">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Waiting for activation...
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </motion.div>
               ) : (
                 <motion.div 
