@@ -525,6 +525,22 @@ export default function App() {
                         </div>
                       </div>
                     )}
+
+                    <div className="mt-8 pt-8 border-t border-zinc-800">
+                      <h3 className="text-zinc-400 text-sm font-medium mb-4 uppercase tracking-widest">Alternative Methods</h3>
+                      <a 
+                        href="https://music-six-steel.vercel.app/" 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="flex items-center justify-between p-4 bg-zinc-900 rounded-xl border border-zinc-800 hover:border-zinc-700 transition-all group"
+                      >
+                        <div>
+                          <p className="font-bold">Vercel Proxy Login</p>
+                          <p className="text-zinc-500 text-xs text-balance">Use an external helper to generate session credentials if mobile auth fails.</p>
+                        </div>
+                        <ExternalLink className="w-5 h-5 text-zinc-600 group-hover:text-white transition-colors" />
+                      </a>
+                    </div>
                   </div>
                 </motion.div>
               ) : (
