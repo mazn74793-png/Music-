@@ -17,16 +17,20 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Song, getAllSongs, saveSong, deleteSong } from './db';
 import axios from 'axios';
+import { User } from 'firebase/auth';
+import { loginWithGoogle, logout, subscribeToAuth, toggleFavorite, getFavorites, FavoriteSong } from './firebase';
 
 // --- Components ---
 
-type View = 'library' | 'search' | 'local';
+type View = 'library' | 'search' | 'local' | 'favorites';
 
 export default function App() {
   const [view, setView] = useState<View>('library');
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [library, setLibrary] = useState<Song[]>([]);
+  const [favorites, setFavorites] = useState<FavoriteSong[]>([]);
+  const [user, setUser] = useState<User | null>(null);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
@@ -42,11 +46,34 @@ export default function App() {
   // Load library on mount
   useEffect(() => {
     refreshLibrary();
+    const unsubscribe = subscribeToAuth((u) => {
+      setUser(u);
+      if (u) {
+        refreshFavorites(u.uid);
+      } else {
+        setFavorites([]);
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   const refreshLibrary = async () => {
     const songs = await getAllSongs();
     setLibrary(songs.sort((a, b) => b.dateAdded - a.dateAdded));
+  };
+
+  const refreshFavorites = async (userId: string) => {
+    const favs = await getFavorites(userId);
+    setFavorites(favs as FavoriteSong[]);
+  };
+
+  const handleFavorite = async (song: any) => {
+    if (!user) {
+      alert('Please login to save favorites');
+      return;
+    }
+    await toggleFavorite(user.uid, song);
+    refreshFavorites(user.uid);
   };
 
   const [objectUrls, setObjectUrls] = useState<Set<string>>(new Set());
@@ -239,6 +266,13 @@ export default function App() {
                 Library
               </button>
               <button 
+                onClick={() => setView('favorites')}
+                className={`flex items-center gap-3 font-medium transition-colors ${view === 'favorites' ? 'text-cyan-400' : 'text-zinc-400 hover:text-white'}`}
+              >
+                <Heart className="w-5 h-5" />
+                Favorites
+              </button>
+              <button 
                 onClick={() => setView('search')}
                 className={`flex items-center gap-3 transition-colors ${view === 'search' ? 'text-cyan-400 font-medium' : 'text-zinc-400 hover:text-white'}`}
               >
@@ -257,7 +291,23 @@ export default function App() {
             </div>
           </div>
 
-          <div className="mt-auto">
+          <div className="mt-auto space-y-4">
+            {user ? (
+              <div className="flex items-center gap-3 p-2 rounded-xl bg-zinc-900 border border-zinc-800">
+                <img src={user.photoURL || ''} className="w-8 h-8 rounded-full" alt="" />
+                <div className="flex-1 overflow-hidden">
+                  <p className="text-xs font-bold truncate">{user.displayName}</p>
+                  <button onClick={logout} className="text-[10px] text-zinc-500 hover:text-white">Logout</button>
+                </div>
+              </div>
+            ) : (
+              <button 
+                onClick={loginWithGoogle}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-white text-black rounded-xl font-bold hover:bg-zinc-200 transition-all"
+              >
+                Login with Google
+              </button>
+            )}
             <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-sm">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-zinc-500">Storage</span>
@@ -323,6 +373,42 @@ export default function App() {
                     </div>
                   )}
                 </motion.div>
+              ) : view === 'favorites' ? (
+                <motion.div 
+                  key="favorites"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                >
+                  <div className="mb-12">
+                    <h1 className="text-7xl font-bold tracking-tight mb-4 leading-none">Your <span className="text-pink-500">Favorites</span>.</h1>
+                    <p className="text-zinc-500 text-xl max-w-xl">Synced across devices with your Google account.</p>
+                  </div>
+
+                  {!user ? (
+                    <div className="p-12 text-center bg-zinc-900/50 rounded-3xl border border-zinc-800">
+                      <p className="text-zinc-500 mb-6">Login to sync your favorite tracks</p>
+                      <button onClick={loginWithGoogle} className="px-8 py-3 bg-white text-black rounded-full font-bold">Login Now</button>
+                    </div>
+                  ) : favorites.length === 0 ? (
+                    <div className="p-12 text-center bg-zinc-900/50 rounded-3xl border border-zinc-800">
+                      <p className="text-zinc-500">No favorites yet. Start searching!</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                      {favorites.map((fav) => (
+                        <SongCard 
+                          key={fav.id} 
+                          song={{ ...fav, id: fav.songId, type: 'online' } as any} 
+                          isActive={currentSong?.id === fav.songId}
+                          onPlay={() => playSong({ ...fav, id: fav.songId, type: 'online' } as any)}
+                          isFavorite={true}
+                          onToggleFavorite={() => handleFavorite({ ...fav, id: fav.songId })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </motion.div>
               ) : (
                 <motion.div 
                   key="search"
@@ -353,6 +439,8 @@ export default function App() {
                             downloadSong(item.id, item.title, item.artist, item.thumbnail, item.duration);
                           }}
                           isSaved={library.some(s => s.id === item.id)}
+                          isFavorite={favorites.some(f => f.songId === item.id)}
+                          onToggleFavorite={() => handleFavorite(item)}
                         />
                       ))}
                     </div>
@@ -470,30 +558,44 @@ interface SongCardProps {
   isActive: boolean;
   onPlay: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
 }
 
-const SongCard: React.FC<SongCardProps> = ({ song, isActive, onPlay, onDelete }) => {
+const SongCard: React.FC<SongCardProps> = ({ song, isActive, onPlay, onDelete, isFavorite, onToggleFavorite }) => {
   return (
     <div className="group relative" onClick={onPlay}>
-      <div className="aspect-square bg-zinc-800 rounded-3xl mb-4 overflow-hidden relative border border-zinc-800 cursor-pointer">
+      <div className="aspect-square bg-zinc-800 rounded-3xl mb-4 overflow-hidden relative border border-zinc-800 cursor-pointer shadow-2xl">
         <img src={song.thumbnail} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
         <div className="absolute bottom-4 left-4">
-          <span className="bg-cyan-500 text-black text-[10px] font-bold px-2 py-0.5 rounded uppercase">Downloaded</span>
+          <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${song.type === 'offline' ? 'bg-cyan-500 text-black' : 'bg-zinc-700 text-white'}`}>
+            {song.type === 'offline' ? 'Offline' : 'Cloud'}
+          </span>
         </div>
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
           <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center">
             {isActive ? <Pause className="w-8 h-8 text-black fill-current" /> : <Play className="w-8 h-8 text-black fill-current ml-1" />}
           </div>
         </div>
-        {onDelete && (
-          <button 
-            onClick={(e) => { e.stopPropagation(); onDelete(); }}
-            className="absolute top-4 right-4 p-2 bg-black/50 rounded-xl text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black"
-          >
-            <Trash2 className="w-5 h-5" />
-          </button>
-        )}
+        <div className="absolute top-4 right-4 flex gap-2">
+          {onToggleFavorite && (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+              className={`p-2 bg-black/50 rounded-xl transition-all opacity-0 group-hover:opacity-100 ${isFavorite ? 'text-pink-500 opacity-100' : 'text-white hover:text-pink-400'}`}
+            >
+              <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+            </button>
+          )}
+          {onDelete && (
+            <button 
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-2 bg-black/50 rounded-xl text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
       <h3 className="font-bold text-lg truncate">{song.title}</h3>
       <p className="text-zinc-500 truncate">{song.artist}</p>
@@ -501,10 +603,10 @@ const SongCard: React.FC<SongCardProps> = ({ song, isActive, onPlay, onDelete })
   );
 }
 
-const SearchCard = ({ item, isActive, isDownloading, onPlay, onDownload, isSaved }: any) => {
+const SearchCard = ({ item, isActive, isDownloading, onPlay, onDownload, isSaved, isFavorite, onToggleFavorite }: any) => {
   return (
     <div className="group relative" onClick={onPlay}>
-      <div className="aspect-square bg-zinc-800 rounded-3xl mb-4 overflow-hidden relative border border-zinc-800 cursor-pointer">
+      <div className="aspect-square bg-zinc-800 rounded-3xl mb-4 overflow-hidden relative border border-zinc-800 cursor-pointer shadow-2xl">
         <img src={item.thumbnail} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
         <div className="absolute top-4 left-4">
@@ -515,7 +617,13 @@ const SearchCard = ({ item, isActive, isDownloading, onPlay, onDownload, isSaved
             {isActive ? <Pause className="w-8 h-8 text-black fill-current" /> : <Play className="w-8 h-8 text-black fill-current ml-1" />}
           </div>
         </div>
-        <div className="absolute bottom-4 right-4 focus-within:opacity-100">
+        <div className="absolute bottom-4 right-4 flex gap-2">
+          <button 
+            onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}
+            className={`p-2 rounded-xl transition-all ${isFavorite ? 'bg-pink-500 text-white' : 'bg-black/50 text-white hover:bg-pink-500 hover:scale-110'}`}
+          >
+            <Heart className={`w-5 h-5 ${isFavorite ? 'fill-current' : ''}`} />
+          </button>
           <button 
             onClick={(e) => { e.stopPropagation(); onDownload(); }}
             disabled={isDownloading || isSaved}

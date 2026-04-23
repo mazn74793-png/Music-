@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "Favorite": {
+      "title": "Favorite Song",
+      "description": "A song saved by a user to their favorites list",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the user who saved the song" },
+        "songId": { "type": "string", "description": "YouTube ID of the song" },
+        "title": { "type": "string", "description": "Title of the song" },
+        "artist": { "type": "string", "description": "Artist of the song" },
+        "thumbnail": { "type": "string", "description": "URL of the song thumbnail" },
+        "duration": { "type": "number", "description": "Duration in seconds" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When it was favorited" }
+      },
+      "required": ["userId", "songId", "title", "artist", "thumbnail", "duration", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/favorites/{favoriteId}": {
+      "schema": "Favorite",
+      "description": "User's favorite songs collection"
+    }
+  }
+}

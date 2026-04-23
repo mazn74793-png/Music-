@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidFavorite(data) {
+      return data.keys().hasAll(['userId', 'songId', 'title', 'artist', 'thumbnail', 'duration', 'createdAt']) && 
+             data.keys().size() == 7 &&
+             data.userId == request.auth.uid &&
+             data.songId is string &&
+             data.title is string && data.title.size() <= 500 &&
+             data.artist is string && data.artist.size() <= 500 &&
+             data.thumbnail is string &&
+             (data.duration is number || data.duration == 0) &&
+             data.createdAt == request.time;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Favorites collection
+    match /favorites/{favoriteId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidFavorite(request.resource.data);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+  }
+}
