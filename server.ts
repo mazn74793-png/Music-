@@ -33,13 +33,28 @@ async function startServer() {
         console.log('[YT-AUTH] No saved session found, running as guest');
       }
 
+      // Hardened initialization with common browser headers
       youtube = await Innertube.create({
         cache: new UniversalCache(false),
+        generate_visitor_id: true,
       });
 
+      // Manually set some context to avoid bot detection
+      const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+      
+      if (youtube.session.context) {
+        youtube.session.context.client.userAgent = userAgent;
+        youtube.session.context.client.clientName = 'WEB';
+        youtube.session.context.client.clientVersion = '2.20240124.01.00';
+      }
+
       if (ytCredentials) {
-        await youtube.session.signIn(ytCredentials);
-        console.log('[YT-AUTH] Signed in successfully from saved session');
+        try {
+          await youtube.session.signIn(ytCredentials);
+          console.log('[YT-AUTH] Signed in successfully from saved session');
+        } catch (signInErr) {
+          console.error('[YT-AUTH] Session sign-in failed, continuing as guest:', signInErr);
+        }
       }
 
       console.log('Innertube initialized successfully');
@@ -63,8 +78,21 @@ async function startServer() {
     res.json({ 
       status: 'ok', 
       youtubeInit: !!youtube,
-      signedIn: youtube?.session?.logged_in || false 
+      signedIn: youtube?.session?.logged_in || false,
+      hasApiKey: !!process.env.YOUTUBE_API_KEY
     });
+  });
+
+  // Store user-provided API key for Tier 3 search
+  app.post('/api/settings/api-key', (req, res) => {
+    const { key } = req.body;
+    if (key) {
+      process.env.YOUTUBE_API_KEY = key;
+      console.log('[SETTINGS] YouTube API Key set manually');
+      res.json({ success: true });
+    } else {
+      res.status(400).json({ error: 'Key is required' });
+    }
   });
 
   // --- YouTube Session Management (OuterTune Style) ---
@@ -129,27 +157,102 @@ async function startServer() {
   // YouTube Music search (OuterTune style)
   app.get('/api/search/music', async (req, res) => {
     const query = req.query.q as string;
+    if (!query) return res.json([]);
+
     try {
       if (!youtube) await initYoutube();
-      const results = await youtube.music.search(query, { type: 'song' });
       
-      // Transform YTM results to a simpler format
-      const songs = results.contents?.flatMap((c: any) => c.contents || [])
-        .filter((item: any) => item.type === 'MusicResponsiveListItem' || item.type === 'Song')
-        .map((item: any) => ({
-          id: item.id,
-          title: item.title,
-          artist: item.artists?.map((a: any) => a.name).join(', ') || item.author?.name || 'Unknown',
-          thumbnail: item.thumbnail?.contents?.[0]?.url || item.thumbnails?.[0]?.url,
-          duration: item.duration?.seconds || 0,
-          durationText: item.duration?.text || '',
-          album: item.album?.name || ''
-        })) || [];
+      let songs: any[] = [];
+      let lastError = '';
+      
+      const performSearch = async () => {
+        // --- TIER 1: YouTube Music Search ---
+        try {
+          console.log(`[SEARCH] Tier 1: YTM Search for "${query}"`);
+          const results = await youtube.music.search(query, { type: 'song' });
+          return results.contents?.flatMap((c: any) => c.contents || [])
+            .filter((item: any) => item.type === 'MusicResponsiveListItem' || item.type === 'Song')
+            .map((item: any) => ({
+              id: item.id,
+              title: item.title,
+              artist: item.artists?.map((a: any) => a.name).join(', ') || item.author?.name || 'Unknown',
+              thumbnail: item.thumbnail?.contents?.[0]?.url || item.thumbnails?.[0]?.url,
+              duration: item.duration?.seconds || 0,
+              durationText: item.duration?.text || '',
+              album: item.album?.name || ''
+            })) || [];
+        } catch (musicErr: any) {
+          console.warn('[SEARCH] Tier 1 failed:', musicErr.message);
+          
+          if (musicErr.message.includes('400')) {
+             console.log('[SEARCH] Self-healing: 400 detected, re-init Innertube...');
+             await initYoutube();
+          }
 
-      res.json(songs);
+          // --- TIER 2: YouTube Core Search ---
+          try {
+            console.log(`[SEARCH] Tier 2: Core Search for "${query}"`);
+            const generalResults = await youtube.search(query, { type: 'video' });
+            return generalResults.videos?.map((video: any) => ({
+              id: video.id,
+              title: video.title?.toString() || 'Unknown Title',
+              artist: video.author?.name || 'Unknown Artist',
+              thumbnail: video.thumbnails?.[0]?.url,
+              duration: video.duration?.seconds || 0,
+              durationText: video.duration?.label || '',
+              album: 'YouTube'
+            })) || [];
+          } catch (coreErr: any) {
+             console.warn('[SEARCH] Tier 2 failed:', coreErr.message);
+             throw coreErr;
+          }
+        }
+      };
+
+      try {
+        songs = await performSearch();
+      } catch (e: any) {
+        lastError = e.message;
+      }
+
+      if (songs && songs.length > 0) return res.json(songs);
+
+      // --- TIER 3: YouTube Data API v3 (Ultimate Fallback) ---
+      const apiKey = process.env.YOUTUBE_API_KEY;
+      if (apiKey) {
+        try {
+          console.log(`[SEARCH] Tier 3: Data API v3 for "${query}"`);
+          const apiRes = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+            params: {
+              part: 'snippet',
+              q: query,
+              maxResults: 20,
+              type: 'video',
+              key: apiKey,
+              videoCategoryId: '10' // Music category
+            }
+          });
+
+          songs = apiRes.data.items.map((item: any) => ({
+            id: item.id.videoId,
+            title: item.snippet.title,
+            artist: item.snippet.channelTitle,
+            thumbnail: item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url,
+            duration: 0,
+            durationText: '--:--',
+            album: 'API Fallback'
+          }));
+
+          if (songs.length > 0) return res.json(songs);
+        } catch (apiErr: any) {
+          console.error('[SEARCH] Tier 3 failed (API Key):', apiErr.message);
+        }
+      }
+
+      throw new Error(`Search unavailable. Last error: ${lastError}`);
     } catch (error: any) {
-      console.error('Music search error:', error.message);
-      res.status(500).json({ error: 'Failed to search YouTube Music' });
+      console.error('Final Search Fatal:', error.message);
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -180,29 +283,44 @@ async function startServer() {
         }
       }
 
-      // Strategy 1: ytdl-core
-      try {
-        const stream = ytdl(videoId, { filter: 'audioonly', quality: 'highestaudio' });
-        res.setHeader('Content-Type', 'audio/mpeg');
-        stream.pipe(res);
-        return;
-      } catch (e) {
-        console.warn('ytdl fail');
-      }
-
-      // Strategy 2: InnerTube Fallback
+      // Strategy 1: InnerTube (Resilient Fallback & Authenticated)
       if (!youtube) await initYoutube();
-      const clients: any[] = ['TV_EMBEDDED', 'ANDROID_TESTSUITE', 'ANDROID_MUSIC'];
+      
+      const clients: any[] = ['TV_EMBEDDED', 'WEB', 'ANDROID_TESTSUITE', 'ANDROID_MUSIC', 'IOS', 'YTMUSIC'];
       let lastError = '';
+      let retryCount = 0;
 
-      for (const client of clients) {
-        try {
-          console.log(`[STREAM] Strategy: Client=${client} for ${videoId}`);
-          const info = await youtube.getInfo(videoId, client);
-          
-          if (info.playability_status?.status === 'OK') {
-            const format = info.chooseFormat({ type: 'audio', quality: 'best' });
-            if (format && format.url) {
+      const attemptStream = async () => {
+        for (const client of clients) {
+          try {
+            console.log(`[STREAM] Strategy: Client=${client} for ${videoId}`);
+            
+            // Add a small artificial delay to avoid rapid-fire blocks
+            await new Promise(r => setTimeout(r, 150));
+
+            // Use specific method for Music clients
+            let info;
+            try {
+              if (client.includes('MUSIC')) {
+                info = await youtube.music.getInfo(videoId);
+              } else {
+                info = await youtube.getInfo(videoId, client);
+              }
+            } catch (fetchErr: any) {
+              if (fetchErr.message.includes('400')) {
+                console.warn(`[STREAM] Client ${client} returned 400.`);
+                if (retryCount === 0) {
+                   console.log('[STREAM] Self-healing: 400 detected, refreshing session...');
+                   await initYoutube();
+                   retryCount++;
+                   return 'retry'; 
+                }
+                continue; 
+              }
+              throw fetchErr;
+            }
+            
+            if (info.playability_status?.status === 'OK') {
               const stream = await info.download({ type: 'audio', quality: 'best' });
               res.setHeader('Content-Type', 'audio/mpeg');
               const reader = stream.getReader();
@@ -212,17 +330,52 @@ async function startServer() {
                 res.write(value);
               }
               res.end();
-              return;
+              return 'done';
+            } else {
+              lastError = info.playability_status?.reason || info.playability_status?.status || 'Error';
+              console.warn(`[STREAM] Client ${client} failed: ${lastError}`);
             }
-          } else {
-            lastError = info.playability_status?.reason || info.playability_status?.status || 'Error';
+          } catch (e: any) {
+            lastError = e.message;
+            console.warn(`[STREAM] Client ${client} error: ${e.message}`);
           }
-        } catch (e: any) {
-          lastError = e.message;
         }
+        return 'failed';
+      };
+
+      let result = await attemptStream();
+      if (result === 'retry') result = await attemptStream();
+      if (result === 'done') return;
+
+      // Strategy 2: ytdl-core (Last Resort)
+      try {
+        console.log(`[STREAM] Last resort: ytdl-core for ${videoId}`);
+        const stream = ytdl(videoId, { 
+          filter: 'audioonly', 
+          quality: 'highestaudio',
+          requestOptions: {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            }
+          }
+        });
+        
+        // Wait for first data or error to avoid broken headers
+        await new Promise((resolve, reject) => {
+          stream.once('info', resolve);
+          stream.once('error', reject);
+          setTimeout(() => reject(new Error('ytdl timeout')), 5000);
+        });
+
+        res.setHeader('Content-Type', 'audio/mpeg');
+        stream.pipe(res);
+        return;
+      } catch (e: any) {
+        console.warn('[STREAM] ytdl-core absolutely failed:', e.message);
+        lastError = e.message;
       }
 
-      throw new Error(`All engines blocked: ${lastError}`);
+      throw new Error(`All streaming engines were blocked. ${lastError === 'Sign in to confirm you’re not a bot' ? 'YouTube is requesting account verification. Please go to Connectivity and link your account.' : lastError}`);
 
     } catch (error: any) {
       console.error(`[STREAM] FATAL for ${videoId}:`, error.message);

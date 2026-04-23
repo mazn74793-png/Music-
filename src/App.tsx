@@ -43,6 +43,7 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [playbackStatus, setPlaybackStatus] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [userApiKey, setUserApiKey] = useState('');
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackIdRef = useRef<number>(0);
@@ -291,6 +292,19 @@ export default function App() {
         onTimeUpdate={() => setProgress(audioRef.current?.currentTime || 0)}
         onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
         onEnded={() => setIsPlaying(false)}
+        onError={async () => {
+          setPlaybackStatus('error');
+          setIsPlaying(false);
+          try {
+            // Try to get error message from server if it failed to serve the audio
+            const res = await axios.get(audioRef.current?.src || '');
+            if (res.data && res.data.error) {
+              setErrorMessage(res.data.error);
+            }
+          } catch (e: any) {
+            setErrorMessage('Playback failed. This usually means YouTube is blocking temporary guest sessions. Try linking your account in Connectivity.');
+          }
+        }}
       />
 
       {/* Main Container */}
@@ -541,6 +555,33 @@ export default function App() {
                         <ExternalLink className="w-5 h-5 text-zinc-600 group-hover:text-white transition-colors" />
                       </a>
                     </div>
+
+                    <div className="mt-6 pt-6 border-t border-zinc-800">
+                      <h3 className="text-zinc-400 text-sm font-medium mb-4 uppercase tracking-widest text-cyan-500">Search Resilience</h3>
+                      <p className="text-zinc-500 text-xs mb-4">If search fails with "400 errors", provide a YouTube Data API v3 Key to enable the Tier 3 safety net.</p>
+                      <div className="flex gap-2">
+                        <input 
+                          type="password" 
+                          placeholder="Your YouTube API Key" 
+                          className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-sm focus:border-cyan-500 outline-none"
+                          value={userApiKey}
+                          onChange={(e) => setUserApiKey(e.target.value)}
+                        />
+                        <button 
+                          onClick={async () => {
+                            try {
+                              await axios.post('/api/settings/api-key', { key: userApiKey });
+                              alert('API Key Saved Successfully');
+                            } catch (e) {
+                              alert('Failed to save key');
+                            }
+                          }}
+                          className="px-6 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl font-bold transition-all"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               ) : (
@@ -629,8 +670,8 @@ export default function App() {
                     )}
                   </button>
                   {playbackStatus === 'error' && (
-                    <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] text-red-500 font-bold">
-                      Playback Error
+                    <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-600 text-white text-[10px] px-3 py-1 rounded-full font-bold shadow-lg animate-bounce">
+                      {errorMessage || 'Playback Error'}
                     </div>
                   )}
                 </div>
