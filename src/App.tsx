@@ -103,8 +103,9 @@ export default function App() {
       // Cleanup polling after 5 mins
       setTimeout(() => clearInterval(interval), 300000);
 
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to start YT auth');
+      alert('Failed to start connection: ' + (e.response?.data?.error || e.message));
       setIsConnectingYt(false);
     }
   };
@@ -206,11 +207,15 @@ export default function App() {
     try {
       const res = await axios.get(`/api/search/music?q=${encodeURIComponent(searchQuery)}`);
       setSearchResults(res.data);
+      if (res.data.length === 0) {
+        setErrorMessage('No results found. Try a different query or link your account.');
+      } else {
+        setErrorMessage('');
+      }
     } catch (err) {
       console.error('Search failed', err);
       setSearchResults([]);
-      setErrorMessage('Search failed. If you are on Vercel, YouTube might be blocking the server IP. Try linking your account or adding a YouTube API Key in "Connect".');
-      setView('settings');
+      setErrorMessage('Search currently restricted. Linking your YouTube account or adding an API Key in "Connectivity" usually resolves this.');
     } finally {
       setIsSearching(false);
     }

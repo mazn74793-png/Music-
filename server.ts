@@ -72,26 +72,7 @@ async function startServer() {
     try {
       console.log(`[SEARCH] Query: "${query}"`);
       
-      // Tier 1: youtube-search-api (Very robust)
-      try {
-        const data = await youtubeSearch.GetListByKeyword(query, false, 20);
-        if (data && data.items && data.items.length > 0) {
-          const results = data.items.map((v: any) => ({
-            id: v.id,
-            title: v.title,
-            artist: v.channelTitle || 'Unknown',
-            thumbnail: v.thumbnail?.thumbnails?.[0]?.url || `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
-            duration: 0, // Not provided by this API easily
-            durationText: v.length?.simpleText || '--:--',
-            album: 'Search Result'
-          }));
-          return res.json(results);
-        }
-      } catch (e) {
-        console.warn('[SEARCH] Tier 1 failed:', e);
-      }
-
-      // Tier 2: yt-search (Scraping-based)
+      // Tier 1: yt-search (Scraping-based, very resilient against cloud IP 400s)
       try {
         const r = await yts(query);
         const videos = r.videos.slice(0, 20);
@@ -103,6 +84,25 @@ async function startServer() {
             thumbnail: v.thumbnail || v.image,
             duration: v.seconds,
             durationText: v.timestamp,
+            album: 'Search Result'
+          }));
+          return res.json(results);
+        }
+      } catch (e) {
+        console.warn('[SEARCH] Tier 1 failed:', e);
+      }
+
+      // Tier 2: youtube-search-api (Very robust)
+      try {
+        const data = await youtubeSearch.GetListByKeyword(query, false, 20);
+        if (data && data.items && data.items.length > 0) {
+          const results = data.items.map((v: any) => ({
+            id: v.id,
+            title: v.title,
+            artist: v.channelTitle || 'Unknown',
+            thumbnail: `https://i.ytimg.com/vi/${v.id}/hqdefault.jpg`,
+            duration: 0,
+            durationText: v.length?.simpleText || '--:--',
             album: 'Search Result'
           }));
           return res.json(results);
@@ -138,20 +138,31 @@ async function startServer() {
     });
   });
 
+  let authPendingData: any = null;
+
   app.get('/api/yt/auth/start', async (req, res) => {
     try {
       if (!youtube) await initYoutube();
       
+      // If we already have a pending code, return it
+      if (authPendingData) {
+        return res.json(authPendingData);
+      }
+
       const codePromise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Auth timed out')), 120000);
+        const timeout = setTimeout(() => {
+          authPendingData = null;
+          reject(new Error('Auth timed out'));
+        }, 120000);
         
         youtube.session.once('auth-pending', (data) => {
           clearTimeout(timeout);
+          authPendingData = data;
           console.log('[AUTH] Auth code generated:', data.user_code);
           resolve(data);
         });
 
-        // Start the sign in flow (non-blocking)
+        // Start the sign in flow
         youtube.session.signIn().catch(err => {
           if (!err.message.includes('auth-pending')) {
             console.error('[AUTH] SignIn error:', err.message);
@@ -161,15 +172,16 @@ async function startServer() {
       });
 
       youtube.session.once('auth', async (data) => {
+        authPendingData = null;
         await fs.writeFile(SESSION_FILE, JSON.stringify(data.credentials), 'utf-8');
         console.log('[AUTH] Token saved successfully');
-        // Re-init with new credentials
         await initYoutube();
       });
 
       const authInfo = await codePromise;
       res.json(authInfo);
     } catch (err: any) {
+      authPendingData = null;
       console.error('[AUTH] Start failed:', err.message);
       res.status(500).json({ error: err.message });
     }
