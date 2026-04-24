@@ -44,6 +44,7 @@ export default function App() {
   const [playbackStatus, setPlaybackStatus] = useState<'idle' | 'loading' | 'playing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [userApiKey, setUserApiKey] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const playbackIdRef = useRef<number>(0);
@@ -207,7 +208,9 @@ export default function App() {
       setSearchResults(res.data);
     } catch (err) {
       console.error('Search failed', err);
-      alert('Search failed. Using fallback.');
+      setSearchResults([]);
+      setErrorMessage('Search failed. If you are on Vercel, YouTube might be blocking the server IP. Try linking your account or adding a YouTube API Key in "Connect".');
+      setView('settings');
     } finally {
       setIsSearching(false);
     }
@@ -279,6 +282,35 @@ export default function App() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const playNext = () => {
+    const list = view === 'library' ? library : searchResults;
+    const currentIndex = list.findIndex(s => s.id === currentSong?.id);
+    if (currentIndex !== -1 && currentIndex < list.length - 1) {
+      playSong(list[currentIndex + 1]);
+    }
+  };
+
+  const playPrevious = () => {
+    const list = view === 'library' ? library : searchResults;
+    const currentIndex = list.findIndex(s => s.id === currentSong?.id);
+    if (currentIndex > 0) {
+      playSong(list[currentIndex - 1]);
+    }
+  };
+
+  const seek = (e: React.MouseEvent | React.TouchEvent, totalDuration: number) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    let clientX = 0;
+    if ('touches' in e) {
+      clientX = e.touches[0].clientX;
+    } else {
+      clientX = (e as React.MouseEvent).clientX;
+    }
+    const x = clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    if (audioRef.current) audioRef.current.currentTime = pct * totalDuration;
+  };
+
   return (
     <div className="flex flex-col h-screen bg-[#050505] text-white font-sans selection:bg-cyan-500 selection:text-black">
       {/* Background Decor */}
@@ -308,7 +340,7 @@ export default function App() {
       />
 
       {/* Main Container */}
-      <div className="flex flex-1 overflow-hidden relative z-10">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative z-10">
         {/* Sidebar (Desktop) */}
         <nav className="hidden md:flex flex-col w-64 bg-black border-r border-zinc-800 p-8 gap-12">
           <div className="text-2xl font-bold tracking-tighter flex items-center gap-2">
@@ -390,16 +422,36 @@ export default function App() {
           </div>
         </nav>
 
+        {/* Mobile Nav Overlay (Bottom Bar) */}
+        <nav className="md:hidden flex bg-zinc-950/80 backdrop-blur-lg border-t border-zinc-800 fixed bottom-0 left-0 right-0 z-50 px-2 py-3 justify-around items-center h-20">
+          <button onClick={() => setView('library')} className={`flex flex-col items-center gap-1 flex-1 ${view === 'library' ? 'text-cyan-400' : 'text-zinc-500'}`}>
+            <LibraryIcon className="w-6 h-6" />
+            <span className="text-[10px] uppercase font-bold tracking-widest">Library</span>
+          </button>
+          <button onClick={() => setView('search')} className={`flex flex-col items-center gap-1 flex-1 ${view === 'search' ? 'text-cyan-400' : 'text-zinc-500'}`}>
+            <SearchIcon className="w-6 h-6" />
+            <span className="text-[10px] uppercase font-bold tracking-widest">Search</span>
+          </button>
+          <button onClick={() => setView('favorites')} className={`flex flex-col items-center gap-1 flex-1 ${view === 'favorites' ? 'text-cyan-400' : 'text-zinc-500'}`}>
+            <Heart className="w-6 h-6" />
+            <span className="text-[10px] uppercase font-bold tracking-widest">Favs</span>
+          </button>
+          <button onClick={() => setView('settings')} className={`flex flex-col items-center gap-1 flex-1 ${view === 'settings' ? 'text-cyan-400' : 'text-zinc-500'}`}>
+            <Monitor className="w-6 h-6" />
+            <span className="text-[10px] uppercase font-bold tracking-widest">Connect</span>
+          </button>
+        </nav>
+
         {/* Main Content Area */}
-        <main className="flex-1 flex flex-col p-12 relative overflow-hidden">
-          {/* Top Search Bar */}
-          <div className="flex-shrink-0 mb-12">
-            <form onSubmit={handleSearch} className="flex items-center bg-zinc-900 border border-zinc-800 rounded-full px-6 py-4 max-w-2xl group focus-within:border-cyan-500/50 transition-all">
-              <SearchIcon className="w-5 h-5 text-zinc-500 mr-4 group-focus-within:text-cyan-500" />
+        <main className="flex-1 flex flex-col p-5 md:p-12 pb-32 md:pb-12 relative overflow-hidden">
+          {/* Top Search Bar (Mobile Hidden on some views) */}
+          <div className={`flex-shrink-0 mb-8 md:mb-12 ${view !== 'search' && view !== 'library' ? 'hidden md:flex' : ''}`}>
+            <form onSubmit={handleSearch} className="flex items-center bg-zinc-900 border border-zinc-800 rounded-full px-5 py-3 md:px-6 md:py-4 max-w-2xl group focus-within:border-cyan-500/50 transition-all">
+              <SearchIcon className="w-5 h-5 text-zinc-500 mr-3 md:mr-4 group-focus-within:text-cyan-500" />
               <input 
                 type="text" 
-                placeholder="Search for songs, artists..." 
-                className="bg-transparent border-none outline-none text-lg w-full placeholder-zinc-600 text-white"
+                placeholder="Search songs..." 
+                className="bg-transparent border-none outline-none text-base md:text-lg w-full placeholder-zinc-600 text-white"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => setView('search')}
@@ -627,99 +679,152 @@ export default function App() {
         </main>
       </div>
 
-      {/* Fixed Player Bar */}
+      {/* Fixed Player / Fullscreen Player */}
       <AnimatePresence>
         {currentSong && (
-          <motion.footer 
-            initial={{ y: 112 }}
-            animate={{ y: 0 }}
-            exit={{ y: 112 }}
-            className="h-28 bg-[#0D0D0D] border-t border-zinc-800 px-8 flex items-center relative z-50 transition-colors"
-          >
-            {/* Currently Playing */}
-            <div className="flex items-center gap-4 w-72">
-              <div className="w-16 h-16 bg-zinc-800 rounded-xl overflow-hidden shadow-lg">
-                <img src={currentSong.thumbnail} alt="" className="w-full h-full object-cover" />
-              </div>
-              <div className="overflow-hidden">
-                <h4 className="font-bold truncate">{currentSong.title}</h4>
-                <p className="text-zinc-500 text-sm truncate">{currentSong.artist}</p>
-              </div>
-              {currentSong.type === 'offline' && (
-                <div className="text-cyan-500 ml-2">
-                  <DownloadCloud className="w-5 h-5" />
+          <>
+            {/* Desktop / Mini Player Bar */}
+            <motion.footer 
+              initial={{ y: 112 }}
+              animate={{ y: 0 }}
+              exit={{ y: 112 }}
+              onClick={() => {
+                if (window.innerWidth < 768) setIsFullscreen(true);
+              }}
+              className="fixed bottom-20 md:bottom-0 left-0 right-0 h-20 md:h-28 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800 px-4 md:px-8 flex items-center justify-between md:justify-start relative z-50 transition-all"
+            >
+              <div className="flex items-center gap-3 md:gap-4 w-full md:w-72">
+                <div className="w-12 h-12 md:w-16 md:h-16 bg-zinc-800 rounded-xl overflow-hidden shadow-lg">
+                  <img src={currentSong.thumbnail} alt="" className="w-full h-full object-cover" />
                 </div>
-              )}
-            </div>
-
-            {/* Controls & Timeline */}
-            <div className="flex-1 flex flex-col items-center max-w-xl mx-auto">
-              <div className="flex items-center gap-10 mb-2">
-                <button className="text-zinc-500 hover:text-white transition-colors">
-                  <SkipBack className="w-8 h-8 fill-current" />
-                </button>
-                <div className="relative">
+                <div className="flex-1 overflow-hidden">
+                  <h4 className="font-bold text-sm md:text-base truncate">{currentSong.title}</h4>
+                  <p className="text-zinc-500 text-xs md:text-sm truncate">{currentSong.artist}</p>
+                </div>
+                <div className="flex items-center gap-3 md:hidden">
                   <button 
-                    onClick={togglePlay}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center hover:scale-105 transition-all shadow-xl ${playbackStatus === 'error' ? 'bg-red-500' : 'bg-white'}`}
+                    onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+                    className="w-10 h-10 rounded-full bg-white flex items-center justify-center"
                   >
-                    {playbackStatus === 'loading' ? (
-                      <div className="w-6 h-6 border-2 border-black border-t-transparent animate-spin rounded-full" />
-                    ) : (
-                      isPlaying ? <Pause className="w-6 h-6 text-black fill-current" /> : <Play className="w-6 h-6 text-black fill-current ml-1" />
-                    )}
+                    {isPlaying ? <Pause className="w-5 h-5 text-black fill-current" /> : <Play className="w-5 h-5 text-black fill-current ml-0.5" />}
                   </button>
-                  {playbackStatus === 'error' && (
-                    <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-600 text-white text-[10px] px-3 py-1 rounded-full font-bold shadow-lg animate-bounce">
-                      {errorMessage || 'Playback Error'}
-                    </div>
-                  )}
                 </div>
-                <button className="text-zinc-500 hover:text-white transition-colors">
-                  <SkipForward className="w-8 h-8 fill-current" />
-                </button>
               </div>
-              <div className="w-full flex items-center gap-3">
-                <span className="text-[10px] text-zinc-500 font-mono w-8">{formatTime(progress)}</span>
-                <div 
-                  className="flex-1 h-1.5 bg-zinc-800 rounded-full relative group cursor-pointer"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const pct = x / rect.width;
-                    if (audioRef.current) audioRef.current.currentTime = pct * duration;
-                  }}
-                >
-                  <motion.div 
-                    className="absolute h-full bg-cyan-500 rounded-full"
-                    style={{ width: `${(progress / duration) * 100 || 0}%` }}
-                  />
-                  <div 
-                    className="absolute w-4 h-4 bg-white rounded-full -top-1.5 shadow-lg scale-0 group-hover:scale-100 transition-transform" 
-                    style={{ left: `${(progress / duration) * 100 || 0}%`, transform: 'translateX(-50%)' }}
-                  />
-                </div>
-                <span className="text-[10px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
-              </div>
-            </div>
 
-            {/* Utilities */}
-            <div className="w-72 flex justify-end items-center gap-6 text-zinc-400">
-              {currentSong.type === 'online' && (
-                <button 
-                  onClick={() => downloadSong(currentSong.id, currentSong.title, currentSong.artist, currentSong.thumbnail, currentSong.duration)}
-                  className={`hover:text-cyan-400 transition-colors ${downloadingIds.has(currentSong.id) ? 'animate-pulse' : ''}`}
-                >
-                  <DownloadCloud className="w-5 h-5" />
-                </button>
-              )}
-              <div className="flex items-center gap-2">
-                <div className="w-24 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                  <div className="w-2/3 h-full bg-zinc-400"></div>
+              {/* Desktop Only Controls */}
+              <div className="hidden md:flex flex-1 flex-col items-center max-w-xl mx-auto">
+                <div className="flex items-center gap-10 mb-2">
+                  <button onClick={playPrevious} className="text-zinc-500 hover:text-white transition-colors">
+                    <SkipBack className="w-8 h-8 fill-current" />
+                  </button>
+                  <div className="relative">
+                    <button 
+                      onClick={togglePlay}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center hover:scale-105 transition-all shadow-xl ${playbackStatus === 'error' ? 'bg-red-500' : 'bg-white'}`}
+                    >
+                      {playbackStatus === 'loading' ? (
+                        <div className="w-6 h-6 border-2 border-black border-t-transparent animate-spin rounded-full" />
+                      ) : (
+                        isPlaying ? <Pause className="w-6 h-6 text-black fill-current" /> : <Play className="w-6 h-6 text-black fill-current ml-1" />
+                      )}
+                    </button>
+                  </div>
+                  <button onClick={playNext} className="text-zinc-500 hover:text-white transition-colors">
+                    <SkipForward className="w-8 h-8 fill-current" />
+                  </button>
+                </div>
+                <div className="w-full flex items-center gap-3">
+                  <span className="text-[10px] text-zinc-500 font-mono w-8">{formatTime(progress)}</span>
+                  <div className="flex-1 h-1.5 bg-zinc-800 rounded-full relative group cursor-pointer" onClick={(e) => seek(e, duration)}>
+                    <motion.div className="absolute h-full bg-cyan-500 rounded-full" style={{ width: `${(progress / duration) * 100 || 0}%` }} />
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono w-8">{formatTime(duration)}</span>
                 </div>
               </div>
-            </div>
-          </motion.footer>
+
+              {/* Desktop Only Utilities */}
+              <div className="hidden md:w-72 md:flex justify-end items-center gap-6 text-zinc-400">
+                {currentSong.type === 'online' && (
+                  <button 
+                    onClick={() => downloadSong(currentSong.id, currentSong.title, currentSong.artist, currentSong.thumbnail, currentSong.duration)}
+                    className={`${downloadingIds.has(currentSong.id) ? 'animate-pulse text-cyan-400' : ''}`}
+                  >
+                    <DownloadCloud className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+            </motion.footer>
+
+            {/* Mobile Fullscreen Player */}
+            <AnimatePresence>
+              {isFullscreen && (
+                <motion.div 
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                  className="fixed inset-0 bg-black z-[100] flex flex-col px-8 py-12"
+                >
+                  <div className="flex justify-between items-center mb-12">
+                    <button onClick={() => setIsFullscreen(false)}><ChevronDown className="w-8 h-8 text-zinc-500" /></button>
+                    <div className="text-center">
+                      <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-zinc-600">Now Playing</p>
+                    </div>
+                    <button onClick={() => { setIsFullscreen(false); setView('settings'); }}><Monitor className="w-6 h-6 text-zinc-500" /></button>
+                  </div>
+
+                  <div className="flex-1 flex flex-col items-center justify-center">
+                    <motion.div 
+                      layoutId={`art-${currentSong.id}`}
+                      className="w-full aspect-square bg-zinc-900 rounded-[2.5rem] overflow-hidden shadow-2xl mb-12"
+                    >
+                      <img src={currentSong.thumbnail} alt="" className="w-full h-full object-cover" />
+                    </motion.div>
+
+                    <div className="w-full mb-8">
+                      <h2 className="text-3xl font-bold mb-2">{currentSong.title}</h2>
+                      <p className="text-xl text-zinc-500">{currentSong.artist}</p>
+                    </div>
+
+                    <div className="w-full space-y-8">
+                      <div className="space-y-4">
+                        <div className="flex justify-between text-xs text-zinc-500 font-mono">
+                          <span>{formatTime(progress)}</span>
+                          <span>{formatTime(duration)}</span>
+                        </div>
+                        <div 
+                          className="h-1.5 bg-zinc-900 rounded-full relative"
+                          onClick={(e) => seek(e, duration)}
+                        >
+                          <div 
+                            className="absolute h-full bg-white rounded-full transition-all duration-300" 
+                            style={{ width: `${(progress / duration) * 100 || 0}%` }} 
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <button className="text-zinc-600"><Heart className="w-7 h-7" /></button>
+                        <div className="flex items-center gap-8">
+                          <button onClick={playPrevious}><SkipBack className="w-10 h-10 fill-current" /></button>
+                          <button 
+                            onClick={togglePlay}
+                            className="w-20 h-20 bg-white rounded-full flex items-center justify-center shadow-xl"
+                          >
+                            {isPlaying ? <Pause className="w-8 h-8 text-black fill-current" /> : <Play className="w-8 h-8 text-black fill-current ml-1" />}
+                          </button>
+                          <button onClick={playNext}><SkipForward className="w-10 h-10 fill-current" /></button>
+                        </div>
+                        <button onClick={() => downloadSong(currentSong.id, currentSong.title, currentSong.artist, currentSong.thumbnail, currentSong.duration)} className={downloadingIds.has(currentSong.id) ? 'text-cyan-400' : 'text-zinc-600'}>
+                          <DownloadCloud className="w-7 h-7" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
         )}
       </AnimatePresence>
     </div>
