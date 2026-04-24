@@ -576,23 +576,29 @@ export default function App() {
                     )}
 
                     {ytAuthData && (
-                      <div className="mt-8 p-6 bg-black rounded-2xl border border-red-500/30 text-center animate-in fade-in slide-in-from-bottom-4">
-                        <p className="text-zinc-400 mb-2">Step 1: Open this URL on your phone/PC</p>
-                        <a 
-                          href={ytAuthData.verification_url} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="text-cyan-400 font-bold mb-6 block text-lg underline flex items-center justify-center gap-2"
-                        >
-                          {ytAuthData.verification_url} <ExternalLink className="w-4 h-4" />
-                        </a>
-                        <p className="text-zinc-400 mb-2">Step 2: Enter this verification code</p>
-                        <div className="text-5xl font-mono font-bold tracking-widest text-white py-6 bg-zinc-900 rounded-xl mb-4 border border-zinc-800">
-                          {ytAuthData.user_code}
+                      <div className="mt-8 p-6 bg-zinc-950 rounded-2xl border border-red-500/30 text-center animate-in fade-in slide-in-from-bottom-4">
+                        <div className="mb-6">
+                          <p className="text-zinc-400 mb-3 text-sm">1. Open the activation link below:</p>
+                          <a 
+                            href={ytAuthData.verification_url} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="bg-zinc-900 border border-zinc-800 px-4 py-3 rounded-xl text-cyan-400 font-bold block text-lg hover:border-cyan-500/50 transition-all flex items-center justify-center gap-2 overflow-hidden text-ellipsis"
+                          >
+                            {ytAuthData.verification_url} <ExternalLink className="w-5 h-5 flex-shrink-0" />
+                          </a>
                         </div>
-                        <div className="flex items-center justify-center gap-2 text-zinc-500 text-sm">
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          Waiting for activation...
+                        
+                        <div className="mb-6">
+                          <p className="text-zinc-400 mb-3 text-sm">2. Enter this code carefully:</p>
+                          <div className="text-5xl font-mono font-bold tracking-widest text-white py-6 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-2xl">
+                            {ytAuthData.user_code}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-center gap-3 text-zinc-400 text-sm bg-zinc-900/50 py-3 rounded-xl">
+                          <RefreshCw className="w-4 h-4 animate-spin text-cyan-500" />
+                          Waiting for you to authorize...
                         </div>
                       </div>
                     )}
