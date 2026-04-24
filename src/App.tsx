@@ -320,8 +320,8 @@ export default function App() {
     <div className="flex flex-col h-screen bg-[#050505] text-white font-sans selection:bg-cyan-500 selection:text-black">
       {/* Background Decor */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-cyan-600/5 blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-blue-600/5 blur-[120px]" />
+        <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-red-600/5 blur-[120px]" />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-zinc-600/5 blur-[120px]" />
       </div>
 
       <audio 
@@ -349,10 +349,10 @@ export default function App() {
         {/* Sidebar (Desktop) */}
         <nav className="hidden md:flex flex-col w-64 bg-black border-r border-zinc-800 p-8 gap-12">
           <div className="text-2xl font-bold tracking-tighter flex items-center gap-2">
-            <div className="w-8 h-8 bg-cyan-500 rounded-full flex items-center justify-center">
-              <div className="w-3 h-3 bg-black rounded-sm rotate-45"></div>
+            <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+              <div className="w-3 h-3 bg-white rounded-full"></div>
             </div>
-            MyStreamer
+            OuterWeb
           </div>
           
           <div className="space-y-8">

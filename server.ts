@@ -11,6 +11,7 @@ import fs from 'fs/promises';
 import yts from 'yt-search';
 import play from 'play-dl';
 import youtubeSearch from 'youtube-search-api';
+import { google } from 'googleapis';
 
 dotenv.config();
 
@@ -72,8 +73,39 @@ async function startServer() {
     try {
       console.log(`[SEARCH] Query: "${query}"`);
       
-      // Tier 1: yt-search (Scraping-based, very resilient against cloud IP 400s)
-      try {
+      const apiKey = process.env.YOUTUBE_API_KEY;
+
+      // Tier 0: Official YouTube Data API (Highest reliability if key exists)
+      if (apiKey) {
+        try {
+          console.log('[SEARCH] Attempting Official API');
+          const yt = google.youtube({ version: 'v3', auth: apiKey });
+          const response = await yt.search.list({
+            part: ['snippet'],
+            q: query,
+            maxResults: 20,
+            type: ['video'],
+            videoCategoryId: '10' // Music
+          });
+
+          if (response.data.items && response.data.items.length > 0) {
+            const results = response.data.items.map((item: any) => ({
+              id: item.id.videoId,
+              title: item.snippet.title,
+              artist: item.snippet.channelTitle,
+              thumbnail: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url,
+              duration: 0,
+              durationText: '--:--',
+              album: 'Official Search'
+            }));
+            return res.json(results);
+          }
+        } catch (e: any) {
+          console.warn('[SEARCH] Official API Tier failed:', e.message);
+        }
+      }
+
+      // Tier 1: yt-search
         const r = await yts(query);
         const videos = r.videos.slice(0, 20);
         if (videos.length > 0) {

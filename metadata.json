@@ -1,6 +1,6 @@
 {
-  "name": "MyStreamer",
-  "description": "Premium music streaming PWA with offline support, local file playback, and atmospheric dark-mode UI.",
+  "name": "OuterWeb Music",
+  "description": "YouTube Music inspired web player with offline support, local file playback, and premium streaming logic.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "audio-playback",
